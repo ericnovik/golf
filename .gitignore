@@ -3,3 +3,6 @@
 .RData
 .Ruserdata
 .Rproj
+golf_cache/
+golf_files/
+rsconnect/

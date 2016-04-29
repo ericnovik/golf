@@ -1,30 +1,143 @@
 ---
-title: "A Probability Model for Golf Putting"
-author: "Eric Novik"
+title: "A Probability Model for Golf Putting (paper by Gelman and Nolan)"
+author: "Eric Novik and Daniel Lee"
 date: "28 April 2016"
 output: html_document
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+library(needs)
+needs(readr)
+needs(ggplot2)
+needs(dplyr)
+needs(magrittr)
+needs(rstan)
+needs(tidyr)
 ```
 
-## R Markdown
+## Set up the Dataset
+```{r}
+N <- 19
+tries <- c(1443, 694, 455, 353,  272, 256, 240, 217, 200, 237, 202, 192, 174, 
+           167, 201, 195, 191, 147, 152)
+successes <- c(1346, 577, 337,  208, 149, 136, 111, 69, 67, 75, 52, 46, 54,
+               28, 27, 31, 33, 20,  24)
+dist <- 2:20 * 12 # converting to inches
+golf <- data.frame(tries, successes, dist)
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+# The golf ball has diameter 2r = 1.68 inches 
+r <- 1.68/2
+# and the hole has diameter 2R = 4.25 inches
+R <- 4.25/2
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
-
-```{r cars}
-summary(cars)
+# estimated parameter from the paper
+sigma <- 0.026
 ```
 
-## Including Plots
-
-You can also embed plots, for example:
-
-```{r pressure, echo=FALSE}
-plot(pressure)
+## Helper Function for the Threshold Angle
+```{r}
+theta0 <- function(x) {
+  asin((R - r) / x)
+}
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+## Replicating the Graph from the Paper
+```{r}
+golf %<>%
+  mutate(
+    p = successes / tries,
+    error_sd = sqrt((p  * (1 - p)) / tries),
+    lower = p - 2 * error_sd,
+    upper = p + 2 * error_sd,
+    fit = 2 * pnorm(theta0(dist) / sigma) - 1
+  )
+
+limits <- with(golf, aes(ymax = upper, ymin = lower))
+p <- ggplot(golf, aes(x = dist, y = p))
+p <- p + geom_pointrange(limits)
+p <- p + geom_line(aes(y = fit), colour = "red")
+p <- p +  xlab("Distance (feet)") + 
+  ylab("Proportion of Success") +
+  theme_bw()
+p
+```
+
+## Stan Model
+This model is defined in ```golf.stan``` file
+```{r, eval=FALSE}
+functions {
+  real theta0(real x, real R, real r) {
+    return asin((R - r) / x);
+  }
+}
+
+data {
+  int N;
+  int<lower = 0> tries[N];
+  int<lower = 0> successes[N];
+  real<lower = 0> dist[N];
+}
+
+transformed data {
+  real R;
+  real r;
+  R <- 4.25 / 2;
+  r <- 1.68 / 2;
+}
+
+parameters {
+  real<lower = 0> sigma;
+}
+
+model {
+  real p[N];
+  
+  for (n in 1:N) {
+    p[n] <- 2 * Phi(theta0(dist[n], R, r) / sigma) - 1;
+  }
+  
+  sigma ~ cauchy(0, 2.5);
+  successes ~ binomial(tries, p);
+}
+
+generated quantities {
+  real sigma_degrees;
+  sigma_degrees <- 180/pi() * sigma;
+}
+```
+
+## Fitting the Model in Stan
+Data is passed directly from the R environment to Stan.
+```{r, cache=TRUE}
+golf_fit <- stan(file = "golf.stan", iter = 200)
+golf_fit
+```
+
+## Extracting Parameter Values and Plotting
+```{r}
+sigma <- rstan::extract(golf_fit, pars = 'sigma') $sigma
+sigma_deg <- rstan::extract(golf_fit, pars = 'sigma_degrees')$sigma_degrees
+
+plot_dens <- function(param) {
+  ggplot(as.data.frame(param), aes(x = param)) + 
+    geom_line(stat = "density") + theme_bw()
+}
+
+plot_dens(sigma) + xlab("Sigma")
+plot_dens(sigma_deg) + xlab("Sigma Degrees")
+```
+
+## Plotting Sigma from Multiple Draws
+```{r}
+fits <- sapply(sigma, FUN = function(x, y) 2 * pnorm(theta0(y), sd = x) - 1, y = golf$dist)
+dim(fits)
+head(fits)[, 1:6]
+fits <- data.frame(fits, dist = golf$dist)
+fits <- gather(fits, key = fit, value = measurement, -dist)
+dim(fits)
+head(fits)
+p + geom_line(data = fits, aes(x = dist, y = measurement, group = fit), alpha = 1/150) + theme_bw()
+```
+
+                

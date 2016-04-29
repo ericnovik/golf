@@ -1,1 +1,5 @@
-This repository contains Stan implementation of A Probability Model for Golf Putting by Gelman and Nolan discussed in this paper: http://stat.columbia.edu/~gelman/research/published/golf.pdf
+* golf.Rmd        - Main Rmd file used to build the project
+* golf.Rproj	    - R Project file; you will probably want to create your own
+* golf.html       - Fully rendered HTML output
+* golf.stan       - Stan model
+* golf_pres.pdf   - Presentaion file from the meetup

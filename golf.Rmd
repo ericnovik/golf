@@ -54,7 +54,7 @@ golf %<>%
   )
 
 limits <- with(golf, aes(ymax = upper, ymin = lower))
-p <- ggplot(golf, aes(x = dist, y = p))
+p <- ggplot(golf, aes(x = dist / 12, y = p))
 p <- p + geom_pointrange(limits)
 p <- p + geom_line(aes(y = fit), colour = "red")
 p <- p +  xlab("Distance (feet)") + 
@@ -137,7 +137,7 @@ fits <- data.frame(fits, dist = golf$dist)
 fits <- gather(fits, key = fit, value = measurement, -dist)
 dim(fits)
 head(fits)
-p + geom_line(data = fits, aes(x = dist, y = measurement, group = fit), alpha = 1/150) + theme_bw()
+p + geom_line(data = fits, aes(x = dist / 12, y = measurement, group = fit), alpha = 1/150) + theme_bw()
 ```
 
                 

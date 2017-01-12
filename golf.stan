@@ -14,8 +14,8 @@ data {
 transformed data {
   real R;
   real r;
-  R <- 4.25 / 2;
-  r <- 1.68 / 2;
+  R = 4.25 / 2;
+  r = 1.68 / 2;
 }
 
 parameters {
@@ -25,9 +25,8 @@ parameters {
 model {
   real p[N];
   
-  for (n in 1:N) {
-    p[n] <- 2 * Phi(theta0(dist[n], R, r) / sigma) - 1;
-  }
+  for (n in 1:N) 
+    p[n] = 2 * Phi(theta0(dist[n], R, r) / sigma) - 1;
   
   sigma ~ cauchy(0, 2.5);
   successes ~ binomial(tries, p);
@@ -35,5 +34,5 @@ model {
 
 generated quantities {
   real sigma_degrees;
-  sigma_degrees <- 180/pi() * sigma;
+  sigma_degrees = 180/pi() * sigma;
 }

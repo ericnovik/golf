@@ -7,13 +7,61 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-library(needs)
-needs(readr)
-needs(ggplot2)
-needs(dplyr)
-needs(magrittr)
-needs(rstan)
-needs(tidyr)
+library(readr)
+library(ggplot2)
+library(dplyr)
+library(magrittr)
+library(rstan)
+library(tidyr)
+```
+
+## Data Simulation
+```{r}
+n <- 101
+# distance to the whole in inches
+dist <- seq(20, 250, length.out = n)
+
+# The golf ball has diameter 2r = 1.68 inches 
+r <- 1.68/2
+
+# and the hole has diameter 2R = 4.25 inches
+R <- 4.25/2
+
+# estimated parameter from the paper (we will try to recover it)
+sigma <- 0.05
+
+# computing the angle theta
+theta0 <- function(x) asin((R - r) / x)
+
+# simulating successes
+p_success <- 2 * pnorm(theta0(dist) / sigma) - 1
+tries <- seq(2000, 100, length.out = n)
+successes <- rbinom(n, size = tries, prob = p_success)
+
+data <- list(N = n, 
+             successes = successes, 
+             tries = tries,
+             dist = dist)
+
+# dataframe for plotting
+golf <- data_frame(
+    p = successes / tries,
+    error_sd = sqrt((p  * (1 - p)) / tries),
+    lower = p - 2 * error_sd,
+    upper = p + 2 * error_sd,
+    fit = p_success
+)
+
+limits <- with(golf, aes(ymax = upper, ymin = lower))
+p <- ggplot(golf, aes(x = dist / 12, y = p))
+p <- p + geom_pointrange(limits)
+p <- p + geom_line(aes(y = fit), colour = "red")
+p <- p +  xlab("Distance (feet)") + 
+  ylab("Proportion of Success") +
+  theme_bw()
+p
+
+
 ```
 
 ## Set up the Dataset
@@ -24,15 +72,11 @@ tries <- c(1443, 694, 455, 353,  272, 256, 240, 217, 200, 237, 202, 192, 174,
 successes <- c(1346, 577, 337,  208, 149, 136, 111, 69, 67, 75, 52, 46, 54,
                28, 27, 31, 33, 20,  24)
 dist <- 2:20 * 12 # converting to inches
-golf <- data.frame(tries, successes, dist)
+data <- list(N = N, 
+             tries = tries, 
+             successes = successes, 
+             dist = dist)
 
-# The golf ball has diameter 2r = 1.68 inches 
-r <- 1.68/2
-# and the hole has diameter 2R = 4.25 inches
-R <- 4.25/2
-
-# estimated parameter from the paper
-sigma <- 0.026
 ```
 
 ## Helper Function for the Threshold Angle
@@ -44,8 +88,9 @@ theta0 <- function(x) {
 
 ## Replicating the Graph from the Paper
 ```{r}
-golf %<>%
-  mutate(
+sigma <- 0.026
+golf <-
+  data_frame(
     p = successes / tries,
     error_sd = sqrt((p  * (1 - p)) / tries),
     lower = p - 2 * error_sd,
@@ -55,8 +100,8 @@ golf %<>%
 
 limits <- with(golf, aes(ymax = upper, ymin = lower))
 p <- ggplot(golf, aes(x = dist / 12, y = p))
-p <- p + geom_pointrange(limits)
-p <- p + geom_line(aes(y = fit), colour = "red")
+p <- p + geom_pointrange(limits, colour = "red")
+#p <- p + geom_line(aes(y = fit), colour = "red")
 p <- p +  xlab("Distance (feet)") + 
   ylab("Proportion of Success") +
   theme_bw()
@@ -82,8 +127,8 @@ data {
 transformed data {
   real R;
   real r;
-  R <- 4.25 / 2;
-  r <- 1.68 / 2;
+  R = 4.25 / 2;
+  r = 1.68 / 2;
 }
 
 parameters {
@@ -93,9 +138,8 @@ parameters {
 model {
   real p[N];
   
-  for (n in 1:N) {
-    p[n] <- 2 * Phi(theta0(dist[n], R, r) / sigma) - 1;
-  }
+  for (n in 1:N) 
+    p[n] = 2 * Phi(theta0(dist[n], R, r) / sigma) - 1;
   
   sigma ~ cauchy(0, 2.5);
   successes ~ binomial(tries, p);
@@ -103,15 +147,50 @@ model {
 
 generated quantities {
   real sigma_degrees;
-  sigma_degrees <- 180/pi() * sigma;
+  sigma_degrees = 180/pi() * sigma;
 }
 ```
 
 ## Fitting the Model in Stan
 Data is passed directly from the R environment to Stan.
 ```{r, cache=TRUE}
-golf_fit <- stan(file = "golf.stan", iter = 200)
-golf_fit
+golf_stan <- stan_model(file = "golf.stan")
+golf_fit <- sampling(golf_stan, iter = 300, chains = 4, data = data)
+
+# Convergence diagnostics
+mcmc_neff(neff_ratio(golf_fit))
+mcmc_rhat(rhat(golf_fit))
+
+golf_samples <- as.array(golf_fit)
+mcmc_acf(golf_samples)
+mcmc_trace(golf_samples, regex_pars = c("sig"))
+
+nusts <- nuts_params(golf_fit)
+lp <- log_posterior(golf_fit)
+mcmc_nuts_divergence(nusts, lp = lp)
+mcmc_nuts_treedepth(nusts, lp = lp)
+
+mcmc_intervals(golf_samples, pars = "sigma")
+
+p_success <- 2 * pnorm(theta0(dist) / mean(golf_samples[, 'sigma'])) - 1
+
+golf <- data_frame(
+    p = successes / tries,
+    error_sd = sqrt((p  * (1 - p)) / tries),
+    lower = p - 2 * error_sd,
+    upper = p + 2 * error_sd,
+    fit = p_success
+)
+
+limits <- with(golf, aes(ymax = upper, ymin = lower))
+p <- ggplot(golf, aes(x = dist / 12, y = p))
+p <- p + geom_pointrange(limits, colour = "red")
+#p <- p + geom_line(aes(y = fit), colour = "red")
+p <- p +  xlab("Distance (feet)") + 
+  ylab("Proportion of Success") +
+  theme_bw()
+p
+
 ```
 
 ## Extracting Parameter Values and Plotting
@@ -130,14 +209,17 @@ plot_dens(sigma_deg) + xlab("Sigma Degrees")
 
 ## Plotting Sigma from Multiple Draws
 ```{r}
-fits <- sapply(sigma, FUN = function(x, y) 2 * pnorm(theta0(y), sd = x) - 1, y = golf$dist)
+fits <- sapply(sigma, FUN = function(x, y) 2 * pnorm(theta0(y), sd = x) - 1, y = dist)
 dim(fits)
 head(fits)[, 1:6]
-fits <- data.frame(fits, dist = golf$dist)
+fits <- data.frame(fits, dist = dist)
 fits <- gather(fits, key = fit, value = measurement, -dist)
 dim(fits)
 head(fits)
-p + geom_line(data = fits, aes(x = dist / 12, y = measurement, group = fit), alpha = 1/150) + theme_bw()
+p + geom_line(data = fits, 
+              aes(x = dist / 12, y = measurement, group = fit), 
+              alpha = 1/150) + theme_bw()
+
 ```
 
                 
